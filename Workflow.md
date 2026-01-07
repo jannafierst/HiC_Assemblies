@@ -221,6 +221,8 @@ https://bitbucket.org/mroachawri/purge_haplotigs/src/master/
 <details>
   <summary><b>Scaffolding</b></summary>  
 
+The workflow here is a little wonky. I used juicer for alignment and processing then YaHS for scaffolding then juicer for assembly visualization and assessment. It is complex but seems to work well.
+
 Set up juicer for the FIU Roary cluster
 
 https://github.com/aidenlab/juicer
@@ -264,11 +266,101 @@ cp CPU/*.* scripts/common
 cp CPU/common/* scripts/common
 
 # Download Juicer Tools JAR file
+# Note - use the current stable release here
 wget https://github.com/aidenlab/Juicebox/releases/download/v2.17.00/juicer_tools_2.17.00.jar   
 
 # Create symbolic link with the expected name
 mv juicer_tools_2.17.00.jar scripts/common/juicer_tools.jar
 ```
+
+Use the Arima site positions python script to generate cut sites across the genome
+
+```
+#!/bin/bash
+
+srun -p highmem1-sapphirerapids --account=acc_jfierst --qos=highmem1 -c 4 --mem=64G --pty bash
+module load miniconda3
+source activate juicer
+module load proxy
+
+GENOME=YOUR_GENOME_HERE  
+
+python generate_site_positions_Arima.py -i ${GENOME}.fa -e GATC GANTC TTAA CTNAG -o ${GENOME}_GATC_GANTC_TTAA_CTNAG.txt
+```
+
+This is the generate_site_positions_Arima.py script
+
+```
+# Generate cut site positions in genome from given restriction enzymes (Multiple enzymes and 'N's are supported!)
+# Author: Xiang Zhou
+# Affiliation: Arima Genomics Inc.
+
+# Usage: generate_site_positions_Arima.py [-h] -i INPUT -e ENZYMES [ENZYMES ...] -o OUTPUT
+# Arguments:
+#   -h, --help                show this help message and exit
+#   -i INPUT                  Input FASTA filename
+#   -e ENZYMES [ENZYMES ...]  Enzyme sequences
+#   -o OUTPUT                 Output filename
+
+# python generate_site_positions_Arima.py -i XXXXX.fa -e GATC GANTC TTAA CTNAG -o XXXXX_GATC_GANTC_TTAA_CTNAG.txt
+
+import sys
+import re
+import argparse
+import os.path
+from Bio import SeqIO
+
+def main():
+	parser = argparse.ArgumentParser(description = "Generate cut site positions in genome from given restriction enzymes (Multiple enzymes and 'N's are supported!)")
+
+	parser.add_argument('-i', metavar='INPUT', type=str, dest='input', help='Input FASTA filename', required=True)
+	parser.add_argument('-e', metavar='ENZYMES', type=str.upper, nargs='+', dest='enzymes', help='Enzyme sequences', required=True)
+	parser.add_argument('-o', metavar='OUTPUT', type=str, dest='output', help='Output filename', required=True)
+
+	args = parser.parse_args()
+
+	with open(args.input, 'r') as FASTA, open(args.output, 'w') as OUTFILE:
+		for record in SeqIO.parse(FASTA, "fasta"):
+			length = len(record.seq)
+			positions = find_re_sites(str(record.seq), args.enzymes)
+
+			if positions:
+				OUTFILE.write("{} {} {}\n".format(record.id, " ".join(map(str, positions)), length))
+			else:
+				OUTFILE.write("{} {}\n".format(record.id, length))
+
+def find_re_sites(sequence, enzymes):
+	#positions = []
+	regex = "|".join(enzymes)
+	regex = regex.replace("N", "[ACGT]")
+	print("Finding cut sites matching pattern: {} ...".format(regex))
+	iter = re.finditer(regex, sequence, re.IGNORECASE)
+	#print([1+m.start() for m in iter])
+
+	return [1+m.start() for m in iter]
+
+if __name__ == '__main__':
+	main()
+```
+
+Once you have generated the site positions you can generate the preliminary file structure and accessory files. Juicer requires each directory and file follows the specific naming conventions.
+
+```
+#!/bin/bash
+
+GENOME=YOUR_GENOME_HERE
+LIBRARY=YOUR_HIC_LIBRARY_HERE
+
+bwa index ${GENOME}.fa
+samtools faidx ${GENOME}.fa
+cut -f1,2 ${GENOME}.fa.fai > ${GENOME}.chrom.sizes
+mkdir qc_reports
+cd qc_reports/
+fastqc ${LIBRARY} -o . -t 8
+
+trim_galore --paired --quality 20 --stringency 3 --length 20 --fastqc --cores 4 --output_dir ./trimmed_data/ ${LIBRARY}_R1.fastq.gz ${LIBRARY}_R2.fastq.gz
+```
+
 
 
 
