@@ -92,10 +92,15 @@ hifiasm -o "$ID" -t "$SLURM_CPUS_PER_TASK" \
     --h2 "$R2_FILE" \
     "$HIFI_FILE"
 
-# STEP 2 & 3: Process both Haplotypes
-for HAP in hap1 hap2; do
-    GFA="${ID}.hic.${HAP}.p_ctg.gfa"
-    FA="${ID}.${HAP}.p_ctg.fa"
+# STEP 2 & 3: Process both Haplotypes and Diploid
+for TYPE in p_ctg hap1 hap2; do
+    if [ "$TYPE" == "p_ctg" ]; then
+        GFA="${ID}.hic.p_ctg.gfa"
+        FA="${ID}.p_ctg.fa"
+    else
+        GFA="${ID}.hic.${TYPE}.p_ctg.gfa"
+        FA="${ID}.${TYPE}.p_ctg.fa"
+    fi
 
     if [ -f "$GFA" ]; then
         echo "Processing $GFA..."
@@ -125,8 +130,92 @@ done
 <details>
   <summary><b>Removing retained heterozygosity</b></summary>
 
+I tried both purge_dups and purge_haplotigs. I found that purge_dups removed more sequence when compared with purge_haplotigs and retained slightly better BUSCO statistics and decided to use purge_dups for these genomes.
+
+```
+#!/bin/bash
+#SBATCH --job-name=PurgeAll
+#SBATCH --account=acc_jfierst
+#SBATCH --qos=highmem1
+#SBATCH --partition=highmem1-sapphirerapids
+#SBATCH --mem=384G
+#SBATCH --cpus-per-task=32
+#SBATCH --output=logs/purge_triple_%A_%a.out
+#SBATCH --mail-user=jfierst@fiu.edu
+#SBATCH --mail-type=ALL
+#SBATCH --array=1-11%3
+#SBATCH --time=12:00:00
+
+# --- 0. ENVIRONMENT ---
+module load miniconda3
+module load samtools
+module load minimap2
+source /home/data/jfierst/miniconda3/etc/profile.d/conda.sh
+conda activate purge_dups
+
+# --- 1. PATHS & SPECIES IDENTIFICATION ---
+BASE_DIR="/home/data/jfierst/frenchworms"
+HIFI_DIR="$BASE_DIR/JulyFrenchPacBio/reads/raw_libraries"
+ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$BASE_DIR/species_list.txt")
+HIFI_READS="$HIFI_DIR/${ID}.hifi.fastq"
+ASM_DIR="$BASE_DIR/assemblies/$ID"
+
+cd "$ASM_DIR" || exit
+
+# --- 2. LOOP THROUGH ALL THREE TARGETS ---
+# This will process p_ctg, hap1, and hap2 sequentially
+for TYPE in p_ctg hap1 hap2; do
+    TARGET_FA="${ID}.${TYPE}.fa"
+    
+    if [ ! -f "$TARGET_FA" ]; then
+        echo "Skipping $TYPE for $ID: File not found."
+        continue
+    fi
+
+    echo "################################################"
+    echo "Starting Purge for $ID - Assembly Type: $TYPE"
+    echo "################################################"
+
+    # Create a unique subdir for this specific version
+    WORK_DIR="purge_${TYPE}"
+    mkdir -p "$WORK_DIR"
+    cd "$WORK_DIR" || exit
+
+    # STEP A: Mapping Reads (Necessary for depth)
+    minimap2 -x map-hifi -t "${SLURM_CPUS_PER_TASK}" "../$TARGET_FA" "$HIFI_READS" > "${TYPE}.hifi.paf"
+
+    # STEP B: Calculate Depth Stats
+    pbcstat "${TYPE}.hifi.paf"
+    calcuts PB.stat > cutoffs 2> calcults.log
+
+    # STEP C: Self-Alignment (To find duplications)
+    split_fa "../$TARGET_FA" > "${TYPE}.split.fa"
+    minimap2 -xasm5 -DP -t "${SLURM_CPUS_PER_TASK}" "${TYPE}.split.fa" "${TYPE}.split.fa" | gzip -c - > "${TYPE}.split.self.paf.gz"
+
+    # STEP D: Run Purge
+    purge_dups -2 -T cutoffs -c PB.base.cov "${TYPE}.split.self.paf.gz" > dups.bed 2> purge_dups.log
+
+    # STEP E: Extract
+    get_seqs -e dups.bed "../$TARGET_FA"
+    
+    # Rename for easy identification later
+    mv purged.fa "${ID}_${TYPE}_purged.fa"
+    mv hap.fa "${ID}_${TYPE}_haplotigs.fa"
+
+    echo "Completed $TYPE for $ID"
+    
+    # Step back up to species dir for the next type in the loop
+    cd ..
+done
+```
+https://github.com/dfguan/purge_dups
+
+https://bitbucket.org/mroachawri/purge_haplotigs/src/master/
+
 <details>
   <summary><b>Scaffolding</b></summary>  
+
+
 
 <details>
   <summary><b>Assembly analysis and visualization</b></summary>
