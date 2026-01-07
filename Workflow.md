@@ -35,7 +35,7 @@ JU4121	*Caenorhabditis sp. 66*
 ***
 
 <details>
-  <summary><b>Hifiasm assembly</b></summary>
+  <summary><b>Hifiasm assembly, file conversion and BUSCO and QUAST evaluation</b></summary>
 
 Hifi and HiC libraries were assembled with Hifiasm using default parameters. I experimented intensely with Hifiasm parameters and different workflows for JU760 (*Pelodera teres*) as there was a lot of residual heterozygosity in the assembly. The highest quality assembled sequence (as measured by BUSCO completion and duplication statistics) resulted from Hifiasm default parameters and purge_dups post-assembly allelic removal so I chose to use that approach for each of these species.
 
@@ -118,3 +118,15 @@ for HAP in hap1 hap2; do
     fi
 done
 ```
+
+<details>
+  <summary><b>Decontamination</b></summary>
+
+<details>
+  <summary><b>Removing retained heterozygosity</b></summary>
+
+<details>
+  <summary><b>Scaffolding</b></summary>  
+
+<details>
+  <summary><b>Assembly analysis and visualization</b></summary>
