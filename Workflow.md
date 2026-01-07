@@ -517,10 +517,25 @@ source activate YaHS
 yahs "${GENOME}" "${OUTPUT_BAM}.dedup" 
 ```
 
+Once YaHS is done you can create a HiC contact matrix for visualization with juicerPre
+
+```
+#!/bin/bash
+
+(juicer pre yahs.out.bin yahs.out_scaffolds_final.agp JU760_purged.fa.fai | sort -k2,2d -k6,6d -T ./ --parallel=8 -S32G | awk 'NF' > alignments_sorted.txt.part) && (mv alignments_sorted.txt.part 
+alignments_sorted.txt)
+
+samtools faidx yahs.out_scaffolds_final.fa
+
+cat yahs.out_scaffolds_final.fa | cut -f1,2 > yahs.out_scaffolds_final.chrom.sizes
+
+(java -jar -Xmx32G ./hic_tools/juicer/scripts/common/juicer_tools.jar pre alignments_sorted.txt out.hic.part yahs.out_scaffolds_final.chrom.sizes) && (mv out.hic.part out.hic)
+```
 
 
-
-<\details>
+</details>
 
 <details>
   <summary><b>Assembly analysis and visualization</b></summary>
+
+</details>
