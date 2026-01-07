@@ -223,9 +223,54 @@ https://bitbucket.org/mroachawri/purge_haplotigs/src/master/
 
 Set up juicer for the FIU Roary cluster
 
-```
+https://github.com/aidenlab/juicer
 
 ```
+module load miniconda3
+
+source activate hic_analysis
+# Configure conda channels in order of priority
+# This only needs to be done once to configure and install software
+conda config --add channels defaults       # Standard packages
+conda config --add channels bioconda       # Bioinformatics packages
+conda config --add channels conda-forge    # Community-maintained packages
+conda config --set channel_priority strict # Preve
+module load proxy
+
+# Install essential tools for Hi-C analysis
+conda install wget
+conda install git
+conda install samtools
+conda install sra-tools
+conda install fastqc
+conda install trim-galore
+conda install bwa
+conda install java-jdk
+conda install gcc
+conda install make
+conda install gawk
+conda install parallel
+
+mkdir -p hic_tools
+cd hic_tools/
+
+# Clone the Juicer repository
+git clone https://github.com/aidenlab/juicer.git
+cd juicer
+
+# Create necessary directory structure for Juicer 2.0
+mkdir -p scripts/common
+cp CPU/*.* scripts/common
+cp CPU/common/* scripts/common
+
+# Download Juicer Tools JAR file
+wget https://github.com/aidenlab/Juicebox/releases/download/v2.17.00/juicer_tools_2.17.00.jar   
+
+# Create symbolic link with the expected name
+mv juicer_tools_2.17.00.jar scripts/common/juicer_tools.jar
+```
+
+
 
 <details>
   <summary><b>Assembly analysis and visualization</b></summary>
