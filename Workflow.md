@@ -129,6 +129,66 @@ done
 <details>
   <summary><b>Decontamination</b></summary>
 
+These libraries contained significant microbial contamination. I used BLAST to identify contig taxonomy. It's very slow so this script runs the BLAST jobs as an array, each to an individual compute node.
+
+```
+#!/bin/bash
+
+#SBATCH --account acc_jfierst
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --qos highmem1
+#SBATCH --output=output_blast_%j.log  # Use %j to make a unique log file for each job
+#SBATCH --mail-user=jfierst@fiu.edu
+#SBATCH --mail-type=ALL
+
+# Load the BLAST+ software module
+module load blast-plus
+
+# Export the path to the BLAST nt database
+export BLASTDB='/home/data/jfierst_classroom/blastPractice/nt_db/'
+
+# Find all .fasta files in the current directory and its subdirectories
+# Get the number of files to set up the job array
+FASTA_FILES=($(find . -type f -name "*.fa"))
+NUM_FILES=${#FASTA_FILES[@]}
+
+# If no files are found, exit
+if [ "$NUM_FILES" -eq 0 ]; then
+    echo "No .fa files found. Exiting."
+    exit 1
+fi
+
+# Submit a job array with a task for each file
+sbatch --array=0-$((NUM_FILES-1)) << 'EOF'
+#!/bin/bash
+#SBATCH --job-name=blast_job_%a
+#SBATCH --output=output_blast_%a.log
+#SBATCH --account acc_jfierst
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --qos highmem1
+#SBATCH --cpus-per-task=16
+
+module load blast-plus
+export BLASTDB='/home/data/jfierst_classroom/blastPractice/nt_db/'
+
+# The full list of files is re-created inside the job
+FASTA_FILES=($(find . -type f -name "*.fa"))
+# Select the file for this specific job array task
+FASTA_FILE=${FASTA_FILES[$SLURM_ARRAY_TASK_ID]}
+
+# Create the output filename by replacing the extension, keeping the full path
+# This is the key change to save the output in the same directory as the input
+OUTPUT_FILE="${FASTA_FILE%.fasta}.out"
+
+# Run blast with your specified parameters
+echo "Starting BLAST for file: $FASTA_FILE"
+blastn -query "$FASTA_FILE" -db nt -culling_limit 5 -evalue 1e-25 -num_threads 16 -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle" -out "$OU
+TPUT_FILE"
+
+echo "BLAST completed. Output saved to: $OUTPUT_FILE"
+EOF
+
+```
 </details>
 
 <details>
