@@ -221,7 +221,11 @@ https://bitbucket.org/mroachawri/purge_haplotigs/src/master/
 <details>
   <summary><b>Scaffolding</b></summary>  
 
+Set up juicer for the FIU Roary cluster
 
+```
+
+```
 
 <details>
   <summary><b>Assembly analysis and visualization</b></summary>
