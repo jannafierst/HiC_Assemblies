@@ -124,8 +124,12 @@ for TYPE in p_ctg hap1 hap2; do
 done
 ```
 
+</details>
+
 <details>
   <summary><b>Decontamination</b></summary>
+
+</details>
 
 <details>
   <summary><b>Removing retained heterozygosity</b></summary>
@@ -211,6 +215,8 @@ done
 https://github.com/dfguan/purge_dups
 
 https://bitbucket.org/mroachawri/purge_haplotigs/src/master/
+
+</details>
 
 <details>
   <summary><b>Scaffolding</b></summary>  
