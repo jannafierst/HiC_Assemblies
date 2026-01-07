@@ -45,17 +45,18 @@ https://github.com/dfguan/purge_dups
 
 https://busco.ezlab.org/
 
-  #!/bin/bash
-  #SBATCH --account=acc_jfierst
-  #SBATCH --qos=highmem1
-  #SBATCH --partition=highmem1-sapphirerapids
-  #SBATCH --mem=384G
-  #SBATCH --cpus-per-task=32
-  #SBATCH --time=48:00:00
-  #SBATCH --output=logs/asm_%A_%a.out
-    #SBATCH --mail-user=jfierst@fiu.edu
-    #SBATCH --mail-type=ALL
-  #SBATCH --array=1-11%3
+```
+#!/bin/bash
+#SBATCH --account=acc_jfierst
+#SBATCH --qos=highmem1
+#SBATCH --partition=highmem1-sapphirerapids
+#SBATCH --mem=384G
+#SBATCH --cpus-per-task=32
+#SBATCH --time=48:00:00
+#SBATCH --output=logs/asm_%A_%a.out
+#SBATCH --mail-user=jfierst@fiu.edu
+#SBATCH --mail-type=ALL
+#SBATCH --array=1-11%3
 
 # 1. Environment & Paths
 module load hifiasm
@@ -116,3 +117,4 @@ for HAP in hap1 hap2; do
         echo "ERROR: Haplotype file $GFA not found for $ID."
     fi
 done
+```
