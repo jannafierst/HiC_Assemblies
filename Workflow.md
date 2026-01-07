@@ -359,10 +359,51 @@ cd qc_reports/
 fastqc ${LIBRARY} -o . -t 8
 
 trim_galore --paired --quality 20 --stringency 3 --length 20 --fastqc --cores 4 --output_dir ./trimmed_data/ ${LIBRARY}_R1.fastq.gz ${LIBRARY}_R2.fastq.gz
+
+mkdir fastq
+
+cp ./trimmed_data/* ./fastq/
+
+gunzip ./fastq/*
 ```
 
+Run the juicer pipeline
 
+```
+#!/bin/bash
 
+#SBATCH --account acc_jfierst
+#SBATCH --qos highmem1
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=16
+#SBATCH --output=out_hifi.log
+#SBATCH --mail-user=jfierst@fiu.edu  #insert your own email
+#SBATCH --mail-type=ALL
+
+module load miniconda3
+
+module load proxy
+
+source activate hic_analysis
+
+# STEP 7: Run Juicer pipeline
+#-----------------------------------------------
+ 
+# Set key variables for the analysis
+DIR="/home/data/jfierst/frenchworms"
+GENOME="JU760_purged"
+REFERENCE_DIR="$DIR/hic_analyses/JU760/juicer/"
+RESTRICTION_SITE="Arima"
+RESTRICTION_FILE="$DIR/hic_analyses/JU760/juicer/JU760_purged_GATC_GANTC_TTAA_CTNAG.txt"
+CHROM_SIZES="$DIR/hic_analyses/JU760_purged/JU760_purged.chrom.sizes"
+THREADS=16
+ 
+# Run the complete Juicer pipeline
+bash $DIR/hic_tools/juicer/scripts/common/juicer.sh -D $DIR/hic_tools/juicer -d $DIR/hic_analyses/JU760/juicer/ -g ${GENOME} -s ${RESTRICTION_SITE} -p ${CHROM_SIZES} -z ${REFERENCE_DIR}/JU760_pur
+ged.fa -t ${THREADS} -y ${RESTRICTION_FILE} --assembly            # Restriction enzyme cut sites
+ 
+```
 
 <details>
   <summary><b>Assembly analysis and visualization</b></summary>
