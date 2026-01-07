@@ -9,16 +9,27 @@ Each of these sequencing libraries is stored on 2 servers that are air-gapped (p
 Species we are studying:
 
 JU760 	*Pelodera teres*
+
 JU763 	*Poikilolaimus oxycercus*
+
 JU3390 	*Bunonema sp.*
-Ju3391	*Bunonema sp.*
+
+JU3391	*Bunonema sp.*
+
 JU4118	*Caenorhabditis sp. 65*
+
 JU4421	*Caenorhabditis sp. 70*
+
 JU3778	*Caenorhabditis sp. 59*
+
 JU4112	*Caenorhabditis sp. 62*
+
 JU3779	*Caenorhabditis sp. 58*
+
 JU4110	*Caenorhabditis sp. 61*
+
 JU4113	*Caenorhabditis sp. 63*
+
 JU4121	*Caenorhabditis sp. 66*
 
 ***
