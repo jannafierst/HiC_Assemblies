@@ -459,11 +459,68 @@ RESTRICTION_FILE="$DIR/hic_analyses/JU760/juicer/JU760_purged_GATC_GANTC_TTAA_CT
 CHROM_SIZES="$DIR/hic_analyses/JU760_purged/JU760_purged.chrom.sizes"
 THREADS=16
  
-# Run the complete Juicer pipeline
+# Run the Juicer pipeline
 bash $DIR/hic_tools/juicer/scripts/common/juicer.sh -D $DIR/hic_tools/juicer -d $DIR/hic_analyses/JU760/juicer/ -g ${GENOME} -s ${RESTRICTION_SITE} -p ${CHROM_SIZES} -z ${REFERENCE_DIR}/JU760_pur
 ged.fa -t ${THREADS} -y ${RESTRICTION_FILE} --assembly            # Restriction enzyme cut sites
  
 ```
+
+Juicer will produce a preliminary HiC alignment which YaHS uses for scaffolding.
+
+```
+#!/bin/bash
+
+#SBATCH --account acc_jfierst
+#SBATCH --qos highmem1
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=16
+#SBATCH --output=out_yahs.log
+#SBATCH --mail-user=jfierst@fiu.edu  #insert your own email
+#SBATCH --mail-type=ALL
+
+module load miniconda3
+
+module load proxy
+module load samtools
+
+# I previously created
+source activate picard
+
+# Define variables for input and output files
+INPUT_BAM="/home/data/jfierst/frenchworms/hic_analyses/JU760/juicer/splits/JU760.fastq.bam"
+OUTPUT_BAM="JU760_sorted.bam"
+TEMP_DIR="." # Set a directory for temporary sort files
+GENOME="/home/data/jfierst/frenchworms/JulyFrenchPacBio/assembled_and_purged/JU760_purged.fa"
+
+# The main samtools command:
+# 1. samtools view -F 4: Filters the BAM file.
+#    -F 4: Exclude (F) reads where flag 4 (unmapped) is set. This keeps only mapped reads.
+# 2. |: Pipes the mapped reads to the next command.
+# 3. samtools sort: Sorts the filtered reads by coordinate.
+#    -T ${TEMP_DIR}/sort_temp: Sets the prefix for temporary files (critical for large files).
+#    -o ${OUTPUT_BAM}: Specifies the final output file name.
+#    -: Reads from standard input (the pipe).
+
+samtools view -b -F 4 "${INPUT_BAM}" | samtools sort -T "${TEMP_DIR}/sort_temp" -o "${OUTPUT_BAM}" -
+
+echo "Successfully filtered '${INPUT_BAM}' to keep only mapped reads and sorted the result into '${OUTPUT_BAM}'."
+
+java -Xmx300g MarkDuplicates -I="${OUTPUT_BAM}" -O="${OUTPUT_BAM}.dedup"
+
+samtools faidx ${GENOME}
+
+cut -f 1,2 ${RAW}.fai > ${GENOME}.chrom.sizes
+
+source activate YaHS
+
+yahs "${GENOME}" "${OUTPUT_BAM}.dedup" 
+```
+
+
+
+
+<\details>
 
 <details>
   <summary><b>Assembly analysis and visualization</b></summary>
