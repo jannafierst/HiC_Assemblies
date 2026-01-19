@@ -192,7 +192,33 @@ EOF
 <deatils>
 <summary>Workflow for decontaminating many genomes</summary>
 
-1. For all genomes, make a directory in scratch and print each contig to a separate file in the created directory.
+<b>1. For all genomes, make a directory in scratch and print each contig to a separate file in the created directory.</b>
+
+This script requires species.txt and type.txt
+
+species.txt:
+
+```
+JU3390
+JU3391
+JU3778
+JU3779
+JU4110
+JU4112
+JU4113
+JU4118
+JU4121
+JU4421
+JU763
+```
+
+type.txt:
+
+```
+p
+hap1
+hap2
+```
 
 decontaminate_step1.sh
 
@@ -228,7 +254,7 @@ while read -r type; do
 
 done < type.txt
 ```
-2. BLAST each contig
+<b>2. BLAST each contig</b>
 
 decontaminate_step2.sh
 
@@ -303,7 +329,9 @@ echo -e "BLAST completed. Output saved to: ${output}"
 mv ${fasta}.tmp ${fasta}
 ```
 
-3. The above BLAST script uses a shortcut for contigs over 1Mb because the longer the sequence, the longer it takes to BLAST. So we random sample 10kb sequences from the 1Mb contig. However, sometimes a BLAST hit isn't found. This could be real or an artifact of the shortcut we took. decontaminate_step3.sh was made to double check that there really isn't a BLAST hit for that contig.
+<b>3. Re-BLAST 
+
+The above BLAST script uses a shortcut for contigs over 1Mb because the longer the sequence, the longer it takes to BLAST. So we random sample 10kb sequences from the 1Mb contig. However, sometimes a BLAST hit isn't found. This could be real or an artifact of the shortcut we took. decontaminate_step3.sh was made to double check that there really isn't a BLAST hit for that contig.
 
 decontaminate_step3.sh
 
@@ -353,7 +381,72 @@ while read -r line; do
 done < ${species}_${type}_reblast.txt
 ```
 
-4. Parse the contigs by BLAST hit. This next step will create the files *keep.txt, *remove.txt, and *check.txt. Any contig with no BLAST hits or a BLAST hit containing a nematode genus name from the nematodes.txt file will be listed in the *keep.txt file. Any contig with a BLAST hit containing a bacterial genus name from the bracteria.txt file will be listed in *remove.txt. Any contig with a BLAST hit not satisfied by the prior conditions is listed in the *check.txt file.
+<b>4. Parse the contigs by BLAST hit.</b>
+
+This next step will create the files *keep.txt, *remove.txt, and *check.txt. Any contig with no BLAST hits or a BLAST hit containing a nematode genus name from the nematodes.txt file will be listed in the *keep.txt file. Any contig with a BLAST hit containing a bacterial genus name from the bracteria.txt file will be listed in *remove.txt. Any contig with a BLAST hit not satisfied by the prior conditions is listed in the *check.txt file.
+
+nematodes.txt:
+```
+Bunonema
+Caenorhabditis
+Haemonchus
+Heligmosomoides
+Litomosoides
+Micoletzkya
+Nippostrongylus
+Oscheius
+Poikilolaimus
+Pristionchus
+Rhabditolaimus
+Rhabditophanes
+Steinernema
+```
+
+bacteria.txt:
+
+```
+Achromobacter
+Acinetobacter
+Advenella
+Aeromonas
+Agrobacterium
+Alcaligenes
+Aminobacter
+Bosea
+Brevundimonas
+Brucella
+Comamonas
+Desulfovibrionaceae
+Devosia
+Elizabethkingia
+Empedobacter
+Enterobacter
+Escherichia
+Faecalibacter
+Flavobacterium
+Granulosicoccus
+Herbiconiux
+Leucobacter
+Mesorhizobium
+Microbacterium
+Minwuia
+Myroides
+Neorhizobium
+Ochrobactrum
+Paraoerskovia
+Pseudochrobactrum
+Pseudomonas
+Rhodococcus
+Roseibium
+Sphingobacterium
+Sphingopyxis
+Stenotrophomonas
+Teredinibacter
+Thauera
+Tritonibacter
+Uncultured bacterium
+Verminephrobacter
+```
 
 decontaminate_step4.sh
 
@@ -400,7 +493,7 @@ done
 
 ```
 
-5. Concatenate the contigs to keep, generating your decontaminated genome assembly.
+<b>5. Concatenate the contigs to keep, generating your decontaminated genome assembly. We made this script to remove only bacterial contigs, or to remove all but nematode contigs. Generally, we find that it is better to only remove bacterial contigs, especially for species less studied.</b>
 
 decontaminate_step5.sh
 
@@ -466,7 +559,7 @@ done < ${SPECIES}_${TYPE}.tmp
 rm ${SPECIES}_${TYPE}.tmp
 ```
 
-6. Quality check the decontaminated assembly to ensure that not too much was removed. We do this by looking at the results of BUSCO and QUAST.
+<b>6. Quality check the decontaminated assembly to ensure that not too much was removed. We do this by looking at the results of BUSCO and QUAST.</b>
 
 decontaminate_step6.sh
 
@@ -511,6 +604,7 @@ export database=/home/data/jfierst/nematoda_odb12
 
 busco -f -c 4 -m genome -i ${assembly} -o ./${species}/${base}_busco --offline --lineage_dataset ${database}
 ```
+</details>
  
 </details>
 
