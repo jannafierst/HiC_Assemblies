@@ -189,6 +189,329 @@ echo "BLAST completed. Output saved to: $OUTPUT_FILE"
 EOF
 
 ```
+<deatils>
+<summary>Workflow for decontaminating many genomes</summary>
+
+1. For all genomes, make a directory in scratch and print each contig to a separate file in the created directory.
+
+decontaminate_step1.sh
+
+```
+#!/bin/bash
+
+#SBATCH --job-name=blast
+#SBATCH --account iacc_jfierst
+#SBATCH --partition highmem1
+#SBATCH --qos highmem1
+#SBATCH --array=1-11
+#SBATCH --output=./logs/output_blast_%j_%a.log
+#SBATCH --mail-user=vegge003@fiu.edu
+#SBATCH --mail-type=ALL
+
+#array defined from list of species names
+species=$(sed "${SLURM_ARRAY_TASK_ID}q;d" species.txt)
+echo -e "${species}"
+
+#make working dir
+mkdir -p /scratch/jfierst/tori/decontaminate/${species}
+wd=/scratch/jfierst/tori/decontaminate/${species}
+
+while read -r type; do
+        mkdir -p ${wd}/${species}_${type}
+
+        #split fasta into one file per contig and redirect output to working dir
+        awk -v wd=${wd} -v species=${species} -v type=${type} '/^>/{filename=sprintf("%s/%s_%s/%s.fasta", wd, species, type, substr($0,2)); print > filename
+; next} {print > filename}' ./${species}/${species}.${type}*.fa
+
+        #make list of contigs
+        ls ${wd}/${species}_${type}/*.fasta > ${wd}/${species}_${type}.contigs
+
+done < type.txt
+```
+2. BLAST each contig
+
+decontaminate_step2.sh
+
+```
+#!/bin/bash
+
+#SBATCH --job-name=blast
+#SBATCH --output=./logs/output_blast_%j_%a.log
+#SBATCH --account iacc_jfierst
+#SBATCH --partition highmem1
+#SBATCH --qos highmem1
+#SBATCH --array=1-PLACEHOLDER
+#SBATCH --cpus-per-task=4
+#SBATCH --mail-type=all
+#SBATCH --mail-user=vegge003@fiu.edu
+
+#useage: first wc -l the contigs file
+#       then, sbatch --array=1-[number of files] decontaminate_step2.sh "$species" "$type"
+#       ex. sbatch --array=1-170 decontaminate_step2.sh JU3778 p
+#       run "find /scratch/jfierst/tori/decontaminate/ -name "*.contigs" -exec wc -l {} +" to find the array size you need
+
+module load blast-plus/2.14.1-gcc-13.2.0-5xwggim
+export BLASTDB='/home/data/jfierst_classroom/blastPractice/nt_db/'
+
+species="$1"
+type="$2"
+
+wd=/scratch/jfierst/tori/decontaminate/${species}
+
+fasta=$(sed "${SLURM_ARRAY_TASK_ID}q;d" ${wd}/${species}_${type}.contigs)
+
+#calculate length
+seq=$(awk 'NR>1 {print}' ${fasta} | tr -d '\n')
+length=${#seq}
+
+if (( length > 1000000 )); then
+        mv ${fasta} ${fasta}.tmp
+        touch ${fasta}
+        for i in {1..10}; do
+        # Random start position (ensure 1kb window doesn't exceed length)
+        start=$(shuf -i 1-$((length - 9999)) -n 1)
+        end=$((start + 9999))
+
+        # Extract subsequence
+        subseq=${seq:start-1:10000}
+
+        # Output FASTA with informative header
+        echo ">region_${i}_${start}_${end}" >> ${fasta}
+        echo "$subseq" >> ${fasta}
+    done
+else
+    echo "Sequence is <= 1 Mb; blasting as is."
+fi
+
+# Create the output filename by replacing the extension
+base=$(basename "$fasta" .fasta)
+output="${wd}/${species}_${type}/${base}.out"
+
+# Run blast
+echo -e "Starting BLAST for file: ${fasta}"
+blastn \
+  -query ${fasta} \
+  -db nt \
+  -culling_limit 5 \
+  -evalue 1e-25 \
+  -num_threads 4 \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle" \
+  -out ${output}
+
+echo -e "BLAST completed. Output saved to: ${output}"
+
+mv ${fasta}.tmp ${fasta}
+```
+
+3. The above BLAST script uses a shortcut for contigs over 1Mb because the longer the sequence, the longer it takes to BLAST. So we random sample 10kb sequences from the 1Mb contig. However, sometimes a BLAST hit isn't found. This could be real or an artifact of the shortcut we took. decontaminate_step3.sh was made to double check that there really isn't a BLAST hit for that contig.
+
+decontaminate_step3.sh
+
+```
+#!/bin/bash
+
+#SBATCH --job-name=re-blast
+#SBATCH --output=./logs/output_re-blast_%j.log
+#SBATCH --account acc_jfierst
+#SBATCH --qos standard
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --mail-type=all
+#SBATCH --mail-user=vegge003@fiu.edu
+#SBATCH --cpus-per-task=8
+
+#find empty files for which the short-cut was used and re-blast them to make sure they really aren't hitting to anything. This will probably take a few days to run
+
+module load blast-plus/2.16.0-gcc-13.3.0-zvqf4gj
+export BLASTDB='/home/data/jfierst_classroom/blastPractice/nt_db/'
+
+species="$1"
+type="$2"
+
+#find empty files, get log file names that match the empty files, inverse search for files that didn't use the short-cut, parse those files to return the fasta path and name.
+find /scratch/jfierst/tori/decontaminate/${species}/${species}_${type} -type f -name "*.out" -empty > ${species}_${type}_search.txt
+grep -f ${species}_${type}_search.txt ./logs/* | cut -d ":" -f 1 | sort | uniq > ${species}_${type}_logs.txt
+while read -r line; do grep -L "Sequence is <= 1 Mb; blasting as is." ${line} >> ${species}_${type}.tmp; done < ${species}_${type}_logs.txt
+mv ${species}_${type}.tmp ${species}_${type}_logs.txt
+while read -r line; do head -1 ${line}| cut -d ":" -f 2 >> ${species}_${type}_reblast.txt; done < ${species}_${type}_logs.txt
+
+while read -r line; do
+
+        output="${line%.fasta}.out"
+
+        echo -e "Starting BLAST for file: ${line}"
+        blastn \
+          -query ${line} \
+          -db nt \
+          -culling_limit 5 \
+          -evalue 1e-25 \
+          -num_threads 8 \
+          -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle" \
+          -out ${output}
+
+        echo -e "BLAST completed. Output saved to: ${output}"
+
+done < ${species}_${type}_reblast.txt
+```
+
+4. Parse the contigs by BLAST hit. This next step will create the files *keep.txt, *remove.txt, and *check.txt. Any contig with no BLAST hits or a BLAST hit containing a nematode genus name from the nematodes.txt file will be listed in the *keep.txt file. Any contig with a BLAST hit containing a bacterial genus name from the bracteria.txt file will be listed in *remove.txt. Any contig with a BLAST hit not satisfied by the prior conditions is listed in the *check.txt file.
+
+decontaminate_step4.sh
+
+```
+#!/bin/bash
+
+#SBATCH --job-name=parse_contigs
+#SBATCH --account acc_jfierst
+#SBATCH --qos standard
+#SBATCH --partition default-partition
+#SBATCH --output=./logs/decontaminate_step4_%j.out
+
+#usage: sbatch decontaminate_step4.sh JU3778 p
+
+species="$1"
+type="$2"
+
+wd=/scratch/jfierst/tori/decontaminate/${species}/${species}_${type}
+out_dir=./${species}
+
+touch ${out_dir}/${species}_${type}_keep.txt
+touch ${out_dir}/${species}_${type}_remove.txt
+touch ${out_dir}/${species}_${type}_check.txt
+
+for file in ${wd}/*.out; do
+    base=$(basename ${file} .out)
+    [[ -f ${file} ]] || continue
+
+    if [[ ! -s ${file} ]] || grep --quiet -Ff nematodes.txt ${file}; then
+        hit=$(cat ${file} | awk -F '\t' '{print $NF}' | sort | uniq -c | sort -r | head -n 1 | sed 's/ /_/g')
+        echo -e "${base}\t${hit}" >> ${out_dir}/${species}_${type}_keep.txt
+
+        else
+                if grep --quiet -Ff bacteria.txt ${file}; then
+                    hit=$(cat ${file} | awk -F '\t' '{print $NF}' | sort | uniq -c | sort -r | head -n 1 | sed 's/ /_/g')
+                    echo -e "${base}\t${hit}" >> ${out_dir}/${species}_${type}_remove.txt
+
+                    else
+                        hit=$(cat ${file} | awk -F '\t' '{print $NF}' | sort | uniq -c | sort -r | head -n 1 | sed 's/ /_/g')
+                        echo -e "${base}\t${hit}" >> ${out_dir}/${species}_${type}_check.txt
+                fi
+    fi
+done
+
+```
+
+5. Concatenate the contigs to keep, generating your decontaminated genome assembly.
+
+decontaminate_step5.sh
+
+```
+#!/bin/bash
+
+#SBATCH --job-name=concat_kept_contigs
+#SBATCH --account acc_jfierst
+#SBATCH --qos standard
+#SBATCH --partition default-partition
+#SBATCH --output=./logs/decontaminate_step5_%j.out
+
+set -euo pipefail
+
+#fail if arguements incomplete
+if [[ $# -lt 3 ]]; then
+        echo "usage: bash decontaminate_step5.sh JU3990 hap1 --bacterial"
+        exit 1
+fi
+
+#set variables
+SPECIES="$1"
+TYPE="$2"
+MODE="$3"
+
+case "$MODE" in
+    --bacterial)
+        RUN_MODE="bacterial_only"
+        ;;
+    --full)
+        RUN_MODE="full_decontamination"
+        ;;
+    *)
+        echo "ERROR: Unknown option '$MODE'"
+        echo "Valid options: --bacterial | --full"
+        exit 1
+        ;;
+esac
+
+#echo variables
+echo "Running decontamination"
+echo "  Strain     : $SPECIES"
+echo "  Haplotype  : $TYPE"
+echo "  Mode       : $RUN_MODE"
+
+WD=/scratch/jfierst/tori/decontaminate/${SPECIES}/${SPECIES}_${TYPE}
+OUT_DIR=./${SPECIES}
+
+if [[ "$RUN_MODE" == "bacterial_only" ]]; then
+    cat ${OUT_DIR}/${SPECIES}_${TYPE}_keep.txt ${OUT_DIR}/${SPECIES}_${TYPE}_check.txt | cut -f 1 > ${SPECIES}_${TYPE}.tmp
+    OUT_FILE=${OUT_DIR}/${SPECIES}_${TYPE}_decontaminated.fa
+fi
+
+if [[ "$RUN_MODE" == "full_decontamination" ]]; then
+    cat ${OUT_DIR}/${SPECIES}_${TYPE}_keep.txt | cut -f 1 > ${SPECIES}_${TYPE}.tmp
+    OUT_FILE=${OUT_DIR}/${SPECIES}_${TYPE}_full_decontaminated.fa
+fi
+
+while read -r line; do
+        cat ${WD}/${line}.fasta >> ${OUT_FILE}
+done < ${SPECIES}_${TYPE}.tmp
+
+rm ${SPECIES}_${TYPE}.tmp
+```
+
+6. Quality check the decontaminated assembly to ensure that not too much was removed. We do this by looking at the results of BUSCO and QUAST.
+
+decontaminate_step6.sh
+
+```
+#!/bin/bash
+
+#SBATCH --job-name=qc
+#SBATCH --output=./logs/output_qc_%j_%a.log
+#SBATCH --account acc_jfierst
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --qos standard
+#SBATCH --array=1-PLACEHOLDER
+#SBATCH --cpus-per-task=4
+#SBATCH --mail-type=all
+#SBATCH --mail-user=vegge003@fiu.edu
+
+#       find -name "*decontaminated.fa" > assemblies.txt
+#       wc -l assemblies.txt
+#useage: first wc -l the assembly file
+#       then, sbatch --array=1-[number of files] decontaminate_step6.sh
+#       ex. sbatch --array=1-20 decontaminate_step6.sh
+
+assembly=$(sed "${SLURM_ARRAY_TASK_ID}q;d" assemblies.txt)
+base=$(basename "$assembly" .fa)
+
+echo "$assembly"
+
+tmp=${assembly#./}
+species=${tmp%%/*}
+echo "$species"
+
+#echo -e "Running QUAST on ${assembly} . . . "
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate quast
+
+quast.py -t 4 --plots-format pdf ${assembly} -o ./${species}/${base}_quast_out/
+
+echo -e "Running BUSCO v6 with nematoda_odb12 on ${assembly} . . . "
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate busco_v6
+export database=/home/data/jfierst/nematoda_odb12
+
+busco -f -c 4 -m genome -i ${assembly} -o ./${species}/${base}_busco --offline --lineage_dataset ${database}
+```
+ 
 </details>
 
 <details>
