@@ -493,7 +493,9 @@ done
 
 ```
 
-<b>5. Concatenate the contigs to keep, generating your decontaminated genome assembly. We made this script to remove only bacterial contigs, or to remove all but nematode contigs. Generally, we find that it is better to only remove bacterial contigs, especially for species less studied.</b>
+<b>5. Concatenate the contigs to keep, generating your decontaminated genome assembly. </b>
+
+We made this script to remove only bacterial contigs, or to remove all but nematode contigs. Generally, we find that it is better to only remove bacterial contigs, especially for species less studied.
 
 decontaminate_step5.sh
 
