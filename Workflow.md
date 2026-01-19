@@ -329,7 +329,7 @@ echo -e "BLAST completed. Output saved to: ${output}"
 mv ${fasta}.tmp ${fasta}
 ```
 
-<b>3. Re-BLAST 
+<b>3. Re-BLAST </b>
 
 The above BLAST script uses a shortcut for contigs over 1Mb because the longer the sequence, the longer it takes to BLAST. So we random sample 10kb sequences from the 1Mb contig. However, sometimes a BLAST hit isn't found. This could be real or an artifact of the shortcut we took. decontaminate_step3.sh was made to double check that there really isn't a BLAST hit for that contig.
 
