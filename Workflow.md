@@ -761,6 +761,7 @@ srun -p highmem1-sapphirerapids --account=acc_jfierst --qos=highmem1 -c 4 --mem=
 module load miniconda3
 source activate juicer
 module load proxy
+module load py-biopython # On FIU HPCC loads the Bio module for SeqIO referenced below
 
 GENOME=YOUR_GENOME_HERE  
 
