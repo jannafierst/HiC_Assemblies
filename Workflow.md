@@ -959,3 +959,166 @@ cat yahs.out_scaffolds_final.fa | cut -f1,2 > yahs.out_scaffolds_final.chrom.siz
   <summary><b>Assembly analysis and visualization</b></summary>
 
 </details>
+
+<details>
+  <summary><b>Variant calling with DeepVariant</b></summary>
+
+Once we have complete assemblies we might want to know where genomic variants map to chromosomes. We can use DeepVariant for this.
+
+First, align PacBio reads to the YaHS-scaffolded assembly. We can do this for one assembly variant (the diploid output) or all 3 assemblies (the diploid and haploid variants).
+
+#!/bin/bash
+
+# --- SLURM HEADER ---
+#SBATCH --job-name=minimap2
+#SBATCH --account acc_jfierst
+#SBATCH --qos highmem1
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --mem=384G
+#SBATCH --cpus-per-task=32
+#SBATCH --output=minimap2_%j.log
+#SBATCH --mail-user=jfierst@fiu.edu
+#SBATCH --mail-type=ALL
+#SBATCH --time=24:00:00 # Recommended time limit for this process
+
+# --- 0. MODULES AND ENVIRONMENT ---
+# Load necessary modules (adjust paths/names if needed)
+module load miniconda3
+module load proxy # If required for network access
+module load samtools
+source activate minimap2
+
+# --- 1. USER-DEFINED VARIABLES (CHANGE THESE) ---
+
+DIR="/home/data/jfierst/frenchworms"
+GENOME_DIR="/home/data/jfierst/jfierst/worm-nomics/hyperdivergent/Pteres/"
+
+# --- 1. SETTINGS & INPUTS ---
+# Define an array of your assembly files
+ASSEMBLIES=(
+    "$GENOME_DIR/yahs.out_scaffolds_final.fa"
+    "$GENOME_DIR/FOO_hap1_BAR" # fill in yours here
+    "$GENOME_DIR/FOO_hap1_BAR" # fill in yours here
+)
+
+HIFI_READS="$DIR/JulyFrenchPacBio/reads/raw_libraries/JU760.hifi.fastq" 
+THREADS=${SLURM_CPUS_PER_TASK:-16}
+
+# --- 2. LOOP THROUGH ASSEMBLIES ---
+for ASM in "${ASSEMBLIES[@]}"; do
+    # Extract the filename without extension to use as a prefix
+    ASM_NAME=$(basename "$ASM" .fa)
+    BAM_FILE="${ASM_NAME}_hifi.bam"
+
+    echo "-------------------------------------------------------"
+    echo "Processing: $ASM_NAME"
+    echo "Mapping HiFi reads to $ASM..."
+    echo "-------------------------------------------------------"
+
+    # Map, convert to BAM, and sort in one pipe
+    # Note: Using -@ for samtools to speed up compression/sorting
+    minimap2 -ax map-hifi -t "${THREADS}" "$ASM" "${HIFI_READS}" | \
+        samtools view -@ 4 -bS - | \
+        samtools sort -@ "${THREADS}" -o "${BAM_FILE}"
+
+    echo "Indexing $BAM_FILE..."
+    samtools index "${BAM_FILE}"
+
+done
+
+echo "Done! All alignments completed."
+
+Once minimap2 has completed we can run DeepVariant through apptainer. It's a little tricky on the HPC as singularity/apptainer runs can't be done as regular slurm jobs so we need to get onto an interactive node and run through there.
+
+https://github.com/google/deepvariant
+
+First, obtain the singularity / apptainer image
+
+	# Pull the image.
+	singularity pull docker://google/deepvariant:"${BIN_VERSION}"
+
+Log onto an interactive node with sufficient resources (here, 32 cores will ensure fast processing).
+
+	srun -p highmem1-sapphirerapids --account=acc_jfierst --qos=highmem1 -c 32 --mem=64G --pty bash
+
+Then run the DeepVariant software
+
+
+
+#!/bin/bash
+
+# --- 1. CONFIGURATION ---
+SAMPLE="JU760_YaHS"
+REF_FASTA="yahs.out_scaffolds_final.fa"
+INPUT_BAM="yahs.out_scaffolds_final_hifi.bam"
+THREADS=32
+
+# Container and Model settings
+SIF="deepvariant_1.6.0.sif"
+MODEL_TYPE="PACBIO"
+
+# --- 2. LOAD MODULES ---
+module load apptainer
+module load samtools
+
+echo "--- Starting Pipeline for $SAMPLE ---"
+
+# --- 3. PREPARE REFERENCE ---
+if [ ! -f "${REF_FASTA}.fai" ]; then
+    echo "Indexing reference..."
+    samtools faidx "$REF_FASTA"
+fi
+
+# --- 4. FIX BAM HEADER & ADD SAMPLE NAME ---
+# samtools dict -u adds the SM (Sample) tag which prevents the DeepVariant crash
+echo "Patching BAM header to match FASTA lengths and adding SM tag..."
+FIXED_BAM="${SAMPLE}_fixed.bam"
+
+samtools dict -u "SM:${SAMPLE}" "$REF_FASTA" > perfect_header.sam
+samtools reheader perfect_header.sam "$INPUT_BAM" > "$FIXED_BAM"
+samtools index "$FIXED_BAM"
+
+rm perfect_header.sam
+
+# --- 5. SETUP DIRECTORIES ---
+INTERMEDIATE_DIR="dv_intermediate_${SAMPLE}"
+# CRITICAL: Remove previous failed run files to avoid ValueError
+rm -rf "$INTERMEDIATE_DIR"
+mkdir -p "$INTERMEDIATE_DIR"
+
+# --- 6. EXECUTE DEEPVARIANT ---
+echo "Launching DeepVariant in the background (nohup)..."
+echo "You can monitor progress with: tail -f dv_progress_${SAMPLE}.log"
+
+# Note: Using /data/$INTERMEDIATE_DIR (no ./) for clean path resolution
+nohup apptainer exec --bind $PWD:/data \
+  "$SIF" \
+  /opt/deepvariant/bin/run_deepvariant \
+  --model_type="$MODEL_TYPE" \
+  --ref="/data/$REF_FASTA" \
+  --reads="/data/$FIXED_BAM" \
+  --output_vcf="/data/${SAMPLE}_variants.vcf.gz" \
+  --output_gvcf="/data/${SAMPLE}_variants.g.vcf.gz" \
+  --intermediate_results_dir="/data/$INTERMEDIATE_DIR" \
+  --num_shards="$THREADS" > "dv_progress_${SAMPLE}.log" 2>&1 &
+
+echo "Job submitted! Use 'ps -ux | grep deepvariant' to check status."
+
+
+Once it's finished you will have a .vcf file. For ease of use and plotting we need to convert this to .bed with bedops vcf2bed https://bedops.readthedocs.io/en/latest/content/reference/file-management/conversion/vcf2bed.html
+
+Create a conda bedops and convert your .vcf to individual .bed files for SNVs, insertions and deletions.
+
+	module load miniconda3
+	conda create --name bedops
+	conda install bioconda::bedops
+
+	source activate bedops
+	gunzip JU760_YaHS_variants.vcf.gz
+	
+	vcf2bed --snvs < JU760_YaHS_variants.vcf > JU760_SNVs.bed
+	vcf2bed --insertions < JU760_YaHS_variants.vcf > JU760_INSs.bed
+	vcf2bed --deletions < JU760_YaHS_variants.vcf > JU760_DELs.bed
+
+
+</details>
