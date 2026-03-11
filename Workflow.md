@@ -731,6 +731,7 @@ conda install gcc
 conda install make
 conda install gawk
 conda install parallel
+conda install bioconda::yahs # install YaHS here to make analyses easier
 
 mkdir -p hic_tools
 cd hic_tools/
@@ -906,6 +907,7 @@ module load samtools
 
 # I previously created
 source activate picard
+source activate hic_analysis
 
 # Define variables for input and output files
 INPUT_BAM="/home/data/jfierst/frenchworms/hic_analyses/JU760/juicer/splits/JU760.fastq.bam"
@@ -931,8 +933,6 @@ java -Xmx300g MarkDuplicates -I="${OUTPUT_BAM}" -O="${OUTPUT_BAM}.dedup"
 samtools faidx ${GENOME}
 
 cut -f 1,2 ${RAW}.fai > ${GENOME}.chrom.sizes
-
-source activate YaHS
 
 yahs "${GENOME}" "${OUTPUT_BAM}.dedup" 
 ```
@@ -966,6 +966,8 @@ cat yahs.out_scaffolds_final.fa | cut -f1,2 > yahs.out_scaffolds_final.chrom.siz
 Once we have complete assemblies we might want to know where genomic variants map to chromosomes. We can use DeepVariant for this.
 
 First, align PacBio reads to the YaHS-scaffolded assembly. We can do this for one assembly variant (the diploid output) or all 3 assemblies (the diploid and haploid variants).
+
+```
 
 #!/bin/bash
 
@@ -1028,6 +1030,8 @@ done
 
 echo "Done! All alignments completed."
 
+```
+
 Once minimap2 has completed we can run DeepVariant through apptainer. It's a little tricky on the HPC as singularity/apptainer runs can't be done as regular slurm jobs so we need to get onto an interactive node and run through there.
 
 https://github.com/google/deepvariant
@@ -1043,7 +1047,7 @@ Log onto an interactive node with sufficient resources (here, 32 cores will ensu
 
 Then run the DeepVariant software
 
-
+```
 
 #!/bin/bash
 
@@ -1104,6 +1108,7 @@ nohup apptainer exec --bind $PWD:/data \
 
 echo "Job submitted! Use 'ps -ux | grep deepvariant' to check status."
 
+```
 
 Once it's finished you will have a .vcf file. For ease of use and plotting we need to convert this to .bed with bedops vcf2bed https://bedops.readthedocs.io/en/latest/content/reference/file-management/conversion/vcf2bed.html
 
