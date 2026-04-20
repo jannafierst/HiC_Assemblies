@@ -1127,3 +1127,103 @@ Create a conda bedops and convert your .vcf to individual .bed files for SNVs, i
 
 
 </details>
+
+<details>
+  <summary><b>Genome Annotation</b></summary>
+
+<details>
+<summary>RNA Alignment</summary>
+
+Download the RNA from NCBI using sratoolkit
+
+```
+#!/bin/bash
+
+#SBATCH --account acc_jfierst
+#SBATCH --qos standard
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --output=./logs/RNAseq_download_%N_%j.log
+
+module load proxy #needed to connect to internet
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate sratoolkit
+
+INPUT_FILE=RNA_accessions.txt #input file: ID ACCESSION (2 columns seperated by a tab)
+mkdir -p /home/data/jfierst/veggers/PDE/frenchworms_annotations/NCBI_RNA
+output_dir=/home/data/jfierst/veggers/PDE/frenchworms_annotations/NCBI_RNA
+
+while read -r line; do
+        species=$(echo -e "${line}" | awk '{print $1}') #set variables
+        accession=$(echo -e "${line}" | awk '{print $2}')
+
+        prefetch ${accession} #sratoolkit commands
+        fasterq-dump ${accession} -O ${species}_RNA
+
+        mv ./${species}_RNA/*_1.fastq ${output_dir}/${species}_1.fastq
+        mv ./${species}_RNA/*_2.fastq ${output_dir}/${species}_2.fastq
+
+        rm -r ${accession} #delete prefetch created directory
+        rmdir ${species}_RNA #delete fastq-dump directory
+
+        #output RNA fastqs in NCBI_RNA directory
+done < ${INPUT_FILE}
+```
+
+Align RNA data to genome with STAR
+
+```
+#!/bin/bash
+
+#SBATCH --account acc_jfierst
+#SBATCH --qos standard
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --output=./logs/STAR_JU4121_p_%j.log
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=12
+#SBATCH --mail-user=vegge003@fiu.edu
+#SBATCH --mail-type=ALL
+
+echo "Run started: $(date)"
+echo "Host: $(hostname)"
+echo
+
+echo "=================== SCRIPT ====================="
+cat "$0"
+echo "================================================"
+echo
+
+
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate STAR
+
+SPECIES=JU4121
+TYPE=p
+
+echo "$SPECIES"
+echo "$TYPE"
+mkdir -p ./frenchworms_RNA_alignment_STAR/${SPECIES}_${TYPE}_STAR
+
+OUT_DIR=./frenchworms_RNA_alignment_STAR/${SPECIES}_${TYPE}_STAR
+FASTA=/home/data/jfierst/veggers/PDE/frenchworms_assemblies/${SPECIES}/${SPECIES}_${TYPE}_scaffolded.fa
+RNA_1=./NCBI_RNA/${SPECIES}_1.fastq
+RNA_2=./NCBI_RNA/${SPECIES}_2.fastq
+
+# Generate genome index
+STAR \
+    --runThreadN 12 --runMode genomeGenerate --genomeDir ${OUT_DIR} \
+    --genomeSAindexNbases 12 --genomeFastaFiles ${FASTA}
+
+# Map the reads
+STAR \
+    --runThreadN 12 --runMode alignReads --genomeDir ${OUT_DIR} \
+    --outSAMstrandField intronMotif --outSAMtype BAM Unsorted \
+    --twopassMode Basic \
+    --readFilesIn ${RNA_1} ${RNA_2} \
+    --outFileNamePrefix ${OUT_DIR}/${SPECIES}_
+```
+
+</details>
+
+</details>
+
