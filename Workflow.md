@@ -1225,5 +1225,178 @@ STAR \
 
 </details>
 
+<details>
+<summary>Predict proteins</summary>
+
+First create softmasked genome using repeatmodeler and repeatmasker. Use repeatmodeler to find repeats.
+
+```
+#!/bin/bash
+#SBATCH --job-name=repeatmodeler
+#SBATCH --output=./logs/repeatmodeler_JU4121_p_scaffolded.%j.out
+#SBATCH --account acc_jfierst
+#SBATCH --cpus-per-task=16
+#SBATCH --nodes=1
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --qos standard
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=vegge003@fiu.edu
+
+echo "Run started: $(date)"
+echo "Host: $(hostname)"
+echo
+
+echo "===== SCRIPT ====="
+cat "$0"
+echo "=================="
+echo
+
+#load software
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate repeatmodeler
+
+#extract known repeats from rhabditida, only needs to be run once (I do this on the head node and not actually in the job, but its in the script as a reminder
+#python /home/veggers/.conda/envs/repeatmodeler/share/RepeatMasker/famdb.py families -f fasta_acc -ad --curated 'rhabditida' > Rhab.repeats
+
+wd=/home/data/jfierst/veggers/PDE/frenchworms_annotations
+
+mkdir -p ./logs
+
+SPECIES=JU4121_p
+echo ${SPECIES}
+
+#paths
+mkdir -p ./frenchworms_repeatmodeler/${SPECIES}
+OUT_DIR=/home/data/jfierst/veggers/PDE/frenchworms_annotations/frenchworms_repeatmodeler/${SPECIES}
+FASTA=/home/data/jfierst/veggers/PDE/frenchworms_assemblies/JU4121/JU4121_p_scaffolded.fa
+
+cd ${OUT_DIR}
+
+#Build the database
+BuildDatabase -name ${SPECIES} ${FASTA}
+
+#Run RepeatModeler for de novo repeat identification and characterization. Takes long time.
+RepeatModeler -threads 16 -database ${SPECIES} #-genomeSampleSizeMax 27000000 #makes repeatmodeler stop after round 4
+
+#Combine the files to create a library of de novo and known repeats
+cat ./RM*/consensi.fa.classified ${wd}/frenchworms_repeatmasker/Rhab.repeats > ${SPECIES}.repeats
+
+cd ${wd}
+```
+
+Now mask the genome with ${SPECIES}.repeats input to repeatmasker.
+
+```
+#!/bin/bash
+
+#SBATCH --job-name=repeatmasker
+#SBATCH --output=./logs/repeatmasker_JU4118_p.%j.out
+#SBATCH --account acc_jfierst
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=8
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --qos standard
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=vegge003@fiu.edu
+
+#script not made for high throughput. with each use you need to change at least the:
+        # output=job_name
+        # SPECIES
+        # GENOME_DIR/GENOME_FILE
+
+
+echo "Run started: $(date)"
+echo "Host: $(hostname)"
+echo
+
+echo "======================= SCRIPT ========================="
+cat "$0"
+echo "========================================================"
+echo
+
+#load software
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate repeatmodeler
+
+#set variables and paths
+wd=/home/data/jfierst/veggers/PDE/frenchworms_annotations
+
+SPECIES=JU4118
+TYPE=p
+echo ${SPECIES}
+echo ${TYPE}
+
+OUT_DIR=./frenchworms_repeatmasker/${SPECIES}_${TYPE}
+mkdir -p ${OUT_DIR}
+cd ${OUT_DIR} #you have to cd because repeatmasker will output to whatever the working dir is, which can potentially overwrite files under certain circumstances. 
+
+GENOME_DIR=/home/data/jfierst/veggers/PDE/frenchworms_assemblies/${SPECIES}
+GENOME_FILE=${SPECIES}_${TYPE}_scaffolded.fa
+REPEATS=${wd}/frenchworms_repeatmodeler/${SPECIES}_${TYPE}/${SPECIES}_${TYPE}.repeats
+
+#Mask the genome of known repeats
+cp ${GENOME_DIR}/${GENOME_FILE} ./
+
+RepeatMasker -lib ${REPEATS} -pa 8 -xsmall ./${GENOME_FILE}
+
+rm ./${GENOME_FILE}
+
+cd ${wd}
+
+```
+
+Now we can predict proteins with BRAKER3, using the softmasked genome and RNA alignment as inputs.
+
+```
+#!/bin/bash
+
+#SBATCH --job-name braker
+#SBATCH --output ./logs/JU4118_p_braker.%j.out
+#SBATCH --account acc_jfierst
+#SBATCH --cpus-per-task 8
+#SBATCH --nodes 1
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --qos standard
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=vegge003@fiu.edu
+
+echo "Run started: $(date)"
+echo "Host: $(hostname)"
+echo
+
+echo "===== SCRIPT ====="
+cat "$0"
+echo "=================="
+echo
+
+#load modules
+module load apptainer/1.4.1-llvm-19.1.7-xd3u2qt
+module load proxy
+
+#export paths
+export BRAKER_SIF=/home/data/jfierst/veggers/PDE/frenchworms_annotations/braker3.sif
+
+#set species variable
+SPECIES=JU4118
+TYPE=p
+MASKED_FASTA=./frenchworms_repeatmasker/${SPECIES}_${TYPE}/${SPECIES}_${TYPE}_scaffolded.fa.masked
+RNA_BAM=./frenchworms_RNA_alignment_STAR/${SPECIES}_${TYPE}_STAR/${SPECIES}_Aligned.out.bam
+
+#organize and remove working directory if it already exists
+wd=./frenchworms_braker_runs/${SPECIES}_braker3
+
+if [ -d $wd ]; then
+    rm -r $wd
+fi
+
+#run braker
+apptainer exec  -B ${PWD}:${PWD}  ${BRAKER_SIF} braker.pl --genome=${MASKED_FASTA} --bam=${RNA_BAM} --prot_seq=refseq_db.faa --workingdir=${wd} --GENEMARK_PATH=${ETP}/gmes --AUGUSTUS_CONFIG_PATH=/home/veggers/.augustus --threads 8 --softmasking --busco_lineage nematoda_odb10
+#you can give braker more threads, but more than 8 and some will be idle during augustus
+```
+
+Once we've predicted proteins with BRAKER3, we should select for the longest isoform. We do this with a program called AGAT. 
+
+</details>
+
 </details>
 
