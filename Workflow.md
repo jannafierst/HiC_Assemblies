@@ -1396,6 +1396,79 @@ apptainer exec  -B ${PWD}:${PWD}  ${BRAKER_SIF} braker.pl --genome=${MASKED_FAST
 
 Once we've predicted proteins with BRAKER3, we should select for the longest isoform. We do this with a program called AGAT. 
 
+```
+#!/bin/bash
+
+#SBATCH --account acc_jfierst
+#SBATCH --qos standard
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --output=./longest_isoform_%j.log
+
+echo "Run started: $(date)"
+echo "Host: $(hostname)"
+echo
+
+echo "======================= SCRIPT ========================="
+cat "$0"
+echo "========================================================"
+echo
+
+#major variables
+species=JU4121
+type=p
+wd=/home/data/jfierst/veggers/PDE/frenchworms_annotations
+braker_dir=${wd}/frenchworms_braker_runs/${species}_${type}_braker3
+
+#load software
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate agat
+
+#paths
+agat=/home/veggers/.conda/envs/agat/bin
+gtf=${braker_dir}/braker.gtf
+genome=${wd}/frenchworms_repeatmasker/${species}_${type}/${species}_${type}_scaffolded.fa.masked
+longest_isoform_gtf=${braker_dir}/${species}_${type}_longest_isoform.gtf
+longest_isoform_aa=${braker_dir}/${species}_${type}_longest_isoform.aa
+stats=${braker_dir}/${species}_${type}_braker_AGATstats
+
+${agat}/agat_sp_keep_longest_isoform.pl -gff ${gtf} -o ${longest_isoform_gtf}
+
+${agat}/agat_sp_extract_sequences.pl -g ${longest_isoform_gtf} -f ${genome} -p -o ${longest_isoform_aa}
+
+${agat}/agat_sp_statistics.pl --gff ${gtf} -f ${genome} -o ${stats}
+
+mv *.log ./logs/.
+```
+
+Now functional annotations can be done with interproscan:
+
+```
+#!/bin/bash
+
+#SBATCH --account iacc_jfierst
+#SBATCH --qos highmem1
+#SBATCH --partition highmem1
+#SBATCH -n 8
+#SBATCH --output=./logs/out_InterProScan_%j.log
+#SBATCH --mail-user=vegge003@fiu.edu
+#SBATCH --mail-type=ALL
+
+#load software
+module load interproscan/5.68.100.0
+
+species=JU4121
+type=p
+
+#remove * character from protein file
+sed -i 's/*//g' ./frenchworms_braker_runs/${species}_${type}_braker3/${species}_${type}_longest_isoform.aa
+
+#run interproscan with goterms and pathways options, output to a tsv
+/home/applications/interproscan/5.68.100.0/interproscan.sh -i ./frenchworms_braker_runs/${species}_${type}_braker3/${species}_${type}_longest_isoform.aa -f tsv -dp -goterms -pa
+
+#move output files to desired destinations
+mv ${species}_${type}_longest_isoform.aa.tsv ./frenchworms_braker_runs/${species}_${type}_braker3/.
+```
+
 </details>
 
 <details>
