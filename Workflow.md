@@ -1383,7 +1383,7 @@ MASKED_FASTA=./frenchworms_repeatmasker/${SPECIES}_${TYPE}/${SPECIES}_${TYPE}_sc
 RNA_BAM=./frenchworms_RNA_alignment_STAR/${SPECIES}_${TYPE}_STAR/${SPECIES}_Aligned.out.bam
 
 #organize and remove working directory if it already exists
-wd=./frenchworms_braker_runs/${SPECIES}_braker3
+wd=./frenchworms_braker_runs/${SPECIES}_${TYPE}_braker3
 
 if [ -d $wd ]; then
     rm -r $wd
