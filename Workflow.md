@@ -1398,5 +1398,41 @@ Once we've predicted proteins with BRAKER3, we should select for the longest iso
 
 </details>
 
+<details>
+<summary>Predicting repeats</summary>
+
+We'll predict repeatitive elements with earlgrey.
+
+```
+#!/bin/bash
+
+#SBATCH --account acc_jfierst
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --qos standard
+#SBATCH --output=JU4118_earlgrey.log
+#SBATCH -n 16
+
+#load software
+module load proxy
+module load miniconda3/24.7.1-none-none-mjgmhio
+source activate earlgrey_v6.3.4
+
+species=JU4118
+type=p
+genome=./frenchworms_repeatmasker/${species}_${type}/${species}_${type}_scaffolded.fa.masked
+
+#run earlGrey
+earlGrey -g ${genome} -s ${species}_${type} -o ./frenchworms_earlGrey -r nematoda -e yes -t 16
+
+# -g = genome file
+# -s = species name (file naming)
+# -o = output dir
+# -r = repeatmasked search term
+# -e = heliano for detection of helitrons
+# -t = treads
+```
+
+</details>
+
 </details>
 
