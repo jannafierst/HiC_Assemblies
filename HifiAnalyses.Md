@@ -70,6 +70,8 @@ done
 
 Then extract coverage 
 
+```
+
 #!/bin/bash
 # comprehensive_windowed_depth.sh
 # Usage: ./comprehensive_windowed_depth.sh <bam_directory> <window_size> <output_csv>
@@ -168,5 +170,6 @@ D}" -v ws="${WINDOW_SIZE}" '
     fi
 done
 
+```
 
 echo "Done! All alignments completed."
