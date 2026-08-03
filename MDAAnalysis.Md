@@ -1,4 +1,151 @@
-First align sequences
+First align sequences to a unified reference containing Scaffold 1, X_{A} and X_{B}
+
+```
+
+#!/bin/bash
+#SBATCH --job-name=minimap2_illumina
+#SBATCH --account acc_jfierst
+#SBATCH --qos highmem1
+#SBATCH --partition highmem1-sapphirerapids
+#SBATCH --mem=384G
+#SBATCH --cpus-per-task=32
+#SBATCH --output=minimap2_illumina_%j.log
+#SBATCH --time=42:00:00
+
+module load miniconda3
+module load samtools
+source activate minimap2
+
+# --- 1. USER-DEFINED VARIABLES ---
+READS_DIR="./reads"
+ASM="/home/data/jfierst/jfierst/worm-nomics/Bunonema_JU3390/JU3390_genome_files/JU3390_unified.fa"
+THREADS=${SLURM_CPUS_PER_TASK:-16}
+
+echo "Starting Illumina alignments to unified assembly (Unfiltered)..."
+
+for R1 in "${READS_DIR}"/*_R1_001.fastq.gz; do
+    SAMPLE=$(basename "${R1}" | cut -d'_' -f1)
+    R2="${R1/_R1_001.fastq.gz/_R2_001.fastq.gz}"
+    BAM_FILE="${SAMPLE}_mapped.bam"
+
+    echo "-------------------------------------------------------"
+    echo "Processing: $SAMPLE"
+    echo "-------------------------------------------------------"
+
+    # Removed -q filter. Storing all alignments.
+    minimap2 -ax sr -t "${THREADS}" "$ASM" "${R1}" "${R2}" | \
+    samtools view -@ 4 -b - | \
+    samtools sort -@ "${THREADS}" -o "${BAM_FILE}"
+
+    echo "Indexing $BAM_FILE..."
+    samtools index "${BAM_FILE}"
+done
+
+echo "Done! All alignments completed."
+
+./diagnostic_window_coverage.sh ./ ./diagnostic_windows.bed ./diagnostic_windows.csv
+
+# Usage: ./targeted_bed_coverage.sh <bam_directory> <diagnostic_windows.bed> <output_csv>
+
+'''
+
+Then extract coverage
+
+```
+#!/bin/bash
+
+# --- SLURM HEADER ---
+#SBATCH --job-name=JU3390_unified_profiler
+#SBATCH --account=acc_jfierst
+#SBATCH --qos=highmem1
+#SBATCH --partition=highmem1-sapphirerapids
+#SBATCH --mem=34G
+#SBATCH --cpus-per-task=8
+#SBATCH --output=unified_profiler_%j.log
+#SBATCH --mail-user=jfierst@fiu.edu
+#SBATCH --mail-type=ALL
+#SBATCH --time=04:00:00
+
+# Exit immediately if a command fails
+set -e 
+
+# --- 1. ENVIRONMENT & PATH ARCHITECTURE ---
+module load miniconda3
+module load samtools
+
+GENOME_DIR="/home/data/jfierst/jfierst/worm-nomics/Bunonema_JU3390/JU3390_genome_files"
+ALIGN_DIR="/home/data/jfierst/jfierst/worm-nomics/Bunonema_JU3390/JU3390_MDA_Illumina/alignments"
+FINAL_OUTPUT="${ALIGN_DIR}/JU3390_comprehensive_population_feature_matrix.txt"
+
+# Initialize output with header
+echo -e "Sample\tHaplotype_Context\tChromosome\tRegion_Name\tMean_Depth\tMedian_Depth\tVariance\tBreadth_Coverage_Pct\tMean_M
+APQ\tMedian_MAPQ\tPct_Reads_MAPQ_0\tPct_Reads_Clipped_Or_Indel" > "${FINAL_OUTPUT}"
+
+echo "========================================================================"
+echo "    STARTING UNIFIED MULTI-DIMENSIONAL POPULATION COHORT PROFILING      "
+echo "========================================================================"
+
+# --- 2. FILE-FIRST LOOP: Detects your actual .bam files ---
+for BAM_PATH in "${ALIGN_DIR}"/*_strict.bam; do
+    
+    [ -f "$BAM_PATH" ] || continue
+    
+    FILENAME=$(basename "${BAM_PATH}")
+    
+    # Extract Haplotype Context from filename
+    # Parses 'JU3390_hap1' from 'F3-10_mapped_to_JU3390_hap1_strict.bam'
+    
+    # 1. Chop off everything before and including "_mapped_to_", then chop off "_strict.bam"
+    HAP_DETECTED=$(echo "${FILENAME}" | sed 's/.*_mapped_to_//' | sed 's/_strict.bam//')
+    
+    # 2. Chop off "_mapped_to_" and everything after it to get the Sample ID
+    SAMPLE=$(echo "${FILENAME}" | sed 's/_mapped_to_.*//')
+    
+    # BED file must match HAP_DETECTED
+    BED_FILE="${GENOME_DIR}/${HAP_DETECTED}_domains.bed"
+    
+    if [ ! -f "${BED_FILE}" ]; then
+        echo "[!] Warning: No BED file found for ${HAP_DETECTED} at ${BED_FILE}. Skipping."
+        continue
+    fi
+    
+    echo ">>> PROCESSING SAMPLE: ${SAMPLE} | HAPLOTYPE: ${HAP_DETECTED} <<<"
+
+    # --- 3. CORE COMPUTATION ENGINE ---
+    while read -r CHROM START END REGION; do
+        [[ -z "$CHROM" || "$CHROM" =~ ^# ]] && continue
+        
+        REGION_STR="${CHROM}:$((START + 1))-${END}"
+
+        # Depth stats
+        stats_depth=$(samtools depth -a -Q 0 -G SUPPLEMENTARY -r "${REGION_STR}" "${BAM_PATH}" | awk '
+            { sum += $3; sq_sum += $3 * $3; count++; freq[$3]++; if ($3 > 0) covered++ }
+            END {
+                if (count == 0) { printf "0.00\t0.00\t0.00\t0.00%%"; exit }
+                avg = sum / count; var = (count > 1) ? (sq_sum - (sum^2 / count)) / (count - 1) : 0.0
+                target = count / 2; cum = 0; med = 0
+                for (d = 0; d <= 5000; d++) { cum += freq[d]; if (cum >= target) { med = d; break } }
+                printf "%.2f\t%.2f\t%.2f\t%.2f%%", avg, med, (var < 0 ? 0 : var), (covered / count) * 100
+            }')
+
+        # Alignment stats (Filtering for MAPQ >= 1 to get valid scores)
+        stats_align=$(samtools view -q 1 "${BAM_PATH}" "${REGION_STR}" | awk '
+            { total_reads++; sum_mapq += $5; freq_mq[$5]++; if ($5 == 0) mapq_0++; if ($6 ~ /[SID]/) clipped++ }
+            END {
+                if (total_reads == 0) { printf "0.00\t0.00\t0.00%%\t0.00%%"; exit }
+                target = total_reads / 2; cum = 0; med_mq = 0
+                for (q = 0; q <= 60; q++) { cum += freq_mq[q]; if (cum >= target) { med_mq = q; break } }
+                printf "%.2f\t%.2f\t%.2f%%\t%.2f%%", sum_mapq / total_reads, med_mq, (mapq_0 / total_reads) * 100, (clipped /
+ total_reads) * 100
+            }')
+
+        echo -e "${SAMPLE}\t${HAP_DETECTED}\t${CHROM}\t${REGION}\t${stats_depth}\t${stats_align}" >> "${FINAL_OUTPUT}"
+    done < "${BED_FILE}"
+done
+
+```
+
+Next align sequences to each phased haplotype-resolved sequence individually
 
 ```
 
@@ -100,101 +247,7 @@ done
 
 ```
 
-Then extract coverage
 
-```
-#!/bin/bash
-
-# --- SLURM HEADER ---
-#SBATCH --job-name=JU3390_unified_profiler
-#SBATCH --account=acc_jfierst
-#SBATCH --qos=highmem1
-#SBATCH --partition=highmem1-sapphirerapids
-#SBATCH --mem=34G
-#SBATCH --cpus-per-task=8
-#SBATCH --output=unified_profiler_%j.log
-#SBATCH --mail-user=jfierst@fiu.edu
-#SBATCH --mail-type=ALL
-#SBATCH --time=04:00:00
-
-# Exit immediately if a command fails
-set -e 
-
-# --- 1. ENVIRONMENT & PATH ARCHITECTURE ---
-module load miniconda3
-module load samtools
-
-GENOME_DIR="/home/data/jfierst/jfierst/worm-nomics/Bunonema_JU3390/JU3390_genome_files"
-ALIGN_DIR="/home/data/jfierst/jfierst/worm-nomics/Bunonema_JU3390/JU3390_MDA_Illumina/alignments"
-FINAL_OUTPUT="${ALIGN_DIR}/JU3390_comprehensive_population_feature_matrix.txt"
-
-# Initialize output with header
-echo -e "Sample\tHaplotype_Context\tChromosome\tRegion_Name\tMean_Depth\tMedian_Depth\tVariance\tBreadth_Coverage_Pct\tMean_M
-APQ\tMedian_MAPQ\tPct_Reads_MAPQ_0\tPct_Reads_Clipped_Or_Indel" > "${FINAL_OUTPUT}"
-
-echo "========================================================================"
-echo "    STARTING UNIFIED MULTI-DIMENSIONAL POPULATION COHORT PROFILING      "
-echo "========================================================================"
-
-# --- 2. FILE-FIRST LOOP: Detects your actual .bam files ---
-for BAM_PATH in "${ALIGN_DIR}"/*_strict.bam; do
-    
-    [ -f "$BAM_PATH" ] || continue
-    
-    FILENAME=$(basename "${BAM_PATH}")
-    
-    # Extract Haplotype Context from filename
-    # Parses 'JU3390_hap1' from 'F3-10_mapped_to_JU3390_hap1_strict.bam'
-    
-    # 1. Chop off everything before and including "_mapped_to_", then chop off "_strict.bam"
-    HAP_DETECTED=$(echo "${FILENAME}" | sed 's/.*_mapped_to_//' | sed 's/_strict.bam//')
-    
-    # 2. Chop off "_mapped_to_" and everything after it to get the Sample ID
-    SAMPLE=$(echo "${FILENAME}" | sed 's/_mapped_to_.*//')
-    
-    # BED file must match HAP_DETECTED
-    BED_FILE="${GENOME_DIR}/${HAP_DETECTED}_domains.bed"
-    
-    if [ ! -f "${BED_FILE}" ]; then
-        echo "[!] Warning: No BED file found for ${HAP_DETECTED} at ${BED_FILE}. Skipping."
-        continue
-    fi
-    
-    echo ">>> PROCESSING SAMPLE: ${SAMPLE} | HAPLOTYPE: ${HAP_DETECTED} <<<"
-
-    # --- 3. CORE COMPUTATION ENGINE ---
-    while read -r CHROM START END REGION; do
-        [[ -z "$CHROM" || "$CHROM" =~ ^# ]] && continue
-        
-        REGION_STR="${CHROM}:$((START + 1))-${END}"
-
-        # Depth stats
-        stats_depth=$(samtools depth -a -Q 0 -G SUPPLEMENTARY -r "${REGION_STR}" "${BAM_PATH}" | awk '
-            { sum += $3; sq_sum += $3 * $3; count++; freq[$3]++; if ($3 > 0) covered++ }
-            END {
-                if (count == 0) { printf "0.00\t0.00\t0.00\t0.00%%"; exit }
-                avg = sum / count; var = (count > 1) ? (sq_sum - (sum^2 / count)) / (count - 1) : 0.0
-                target = count / 2; cum = 0; med = 0
-                for (d = 0; d <= 5000; d++) { cum += freq[d]; if (cum >= target) { med = d; break } }
-                printf "%.2f\t%.2f\t%.2f\t%.2f%%", avg, med, (var < 0 ? 0 : var), (covered / count) * 100
-            }')
-
-        # Alignment stats (Filtering for MAPQ >= 1 to get valid scores)
-        stats_align=$(samtools view -q 1 "${BAM_PATH}" "${REGION_STR}" | awk '
-            { total_reads++; sum_mapq += $5; freq_mq[$5]++; if ($5 == 0) mapq_0++; if ($6 ~ /[SID]/) clipped++ }
-            END {
-                if (total_reads == 0) { printf "0.00\t0.00\t0.00%%\t0.00%%"; exit }
-                target = total_reads / 2; cum = 0; med_mq = 0
-                for (q = 0; q <= 60; q++) { cum += freq_mq[q]; if (cum >= target) { med_mq = q; break } }
-                printf "%.2f\t%.2f\t%.2f%%\t%.2f%%", sum_mapq / total_reads, med_mq, (mapq_0 / total_reads) * 100, (clipped /
- total_reads) * 100
-            }')
-
-        echo -e "${SAMPLE}\t${HAP_DETECTED}\t${CHROM}\t${REGION}\t${stats_depth}\t${stats_align}" >> "${FINAL_OUTPUT}"
-    done < "${BED_FILE}"
-done
-
-```
 
 Extract coverage across domain seams
 
