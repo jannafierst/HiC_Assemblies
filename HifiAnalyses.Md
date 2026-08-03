@@ -1,5 +1,7 @@
 First align the hifi sequences to each of the haplotypes
 
+```
+
 #!/bin/bash
 
 # --- SLURM HEADER ---
@@ -63,6 +65,8 @@ for ASM in "${ASSEMBLIES[@]}"; do
     samtools index "${BAM_FILE}"
 
 done
+
+```
 
 Then extract coverage 
 
